@@ -27,11 +27,14 @@ The gateway is one per container, started from the root home; it serves the `and
 with the profile's settings (`hermes gateway run` inside the profile is refused with exit 78):
 
 ```sh
-API_SERVER_ENABLED=true API_SERVER_KEY=<16+ characters> HERMES_HOME=/root/.hermes hermes gateway run
+printf 'API_SERVER_ENABLED=true\nAPI_SERVER_KEY=<16+ characters>\n' > /root/.hermes/.env
+HERMES_HOME=/root/.hermes hermes gateway run
 ```
 
-With `API_SERVER_KEY` (16+ characters) also in `$HERMES_HOME/.env`, the profile's OpenAI-compatible
-API is at `http://127.0.0.1:8642/p/android/v1`.
+The listener settings must be in `/root/.hermes/.env`: a gateway serving profiles ignores keys
+passed as process environment. With an `API_SERVER_KEY` (16+ characters) also in
+`$HERMES_HOME/.env`, the profile's OpenAI-compatible API is at
+`http://127.0.0.1:8642/p/android/v1`.
 
 Updating Hermes means installing a newer image; `hermes update` does not work inside the
 container.

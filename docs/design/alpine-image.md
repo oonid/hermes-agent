@@ -1,7 +1,7 @@
 # Alpine Hermes Image
 
 **Date:** 2026-10-19
-**Status:** implemented; validation on a phone pending (§11)
+**Status:** implemented and validated on a phone (§11)
 
 ## 1. Goal
 
@@ -82,11 +82,12 @@ the existing generic app, oonid/pr, through its Custom OCI image card.
   and serving every profile; `hermes gateway run` under a named profile is refused (exit 78,
   "configuration error", so supervisors do not restart it). Apps start it with
   `HERMES_HOME=/root/.hermes hermes gateway run`. It serves the `android` profile from the
-  profile's own settings and keys. The API server listens on the root home's settings, passed as
-  process environment (`API_SERVER_ENABLED=true`, `API_SERVER_KEY` of at least 16 characters), and
-  serves the profile at `:8642/p/android/v1` with the key in the profile's `.env`. The root home
-  keeps only the gateway's runtime state (pid, locks, cron ticker), which an image upgrade may
-  drop.
+  profile's own settings and keys. The API server listens on the root home's settings, which go in
+  `/root/.hermes/.env` (`API_SERVER_ENABLED=true`, `API_SERVER_KEY` of at least 16 characters):
+  a gateway serving profiles ignores secrets passed as process environment. It serves the profile
+  at `:8642/p/android/v1` with the `API_SERVER_KEY` in the profile's `.env`. The root home keeps
+  the gateway's runtime state (pid, locks, cron ticker) and the API server's `/v1/responses` store
+  (`response_store.db`), which an image upgrade drops unless the app keeps them.
 - **Size:** reported on every build (compressed and uncompressed). No limit yet; one is set after
   the first real build.
 
@@ -176,9 +177,33 @@ automatic syncing of the fork's `main`, and image signing (cosign).
 - The image is built from a read-only bind mount of the prepared checkout's `.git`, cloned into
   place before the installer runs: copying the source left dead layers, and the installer's own
   blobless clone of a shallow checkout recursed until it ran out of file descriptors.
+- The API server's listener key goes in the root home's `.env`: on the phone, a key passed as
+  process environment left the gateway without its API server.
 - The baked `.git` is repacked into one pack and the install-time telemetry receipt is removed;
   builds use `--provenance=false` so a containerd image store pushes a plain manifest.
 
 ## 11. Validation on a Phone
 
-Pending: install the image through oonid/pr on a phone and confirm the §9 criteria there.
+On 2026-10-20, `ghcr.io/oonid/hermes-agent:v0.22.2` (build `v0.22.2-p899573c2`) on an Android 16
+phone with oonid/pr 1.0.0, as a Custom OCI image with alias `hermes-img`:
+
+- **Install:** 99 s, against about 11 minutes for installing Hermes on the phone. It downloaded
+  618 MB (three layers; the Alpine base layer was already in pr-cli's layer cache). The container
+  takes 1.7 GB, and pr-cli keeps the downloaded layers in its cache.
+- **First run:** `HERMES_HOME` is `/root/.hermes/profiles/android`, empty; `hermes --version`
+  prints `Hermes Agent v0.22.2 (2026.9.24) · upstream d923a5eb` with no dependency sync and no
+  `installs/` in the profile. 10.2 s the first time (Python compiles its bytecode), 7.7 s after.
+- **Gateway:** started from the root home with the listener settings in `/root/.hermes/.env`, its
+  API answered `/health` 25–30 s after start. Two chat requests to `/p/android/v1` with the
+  profile's key answered (10 s and 9 s, a model served through a local proxy reached with
+  `adb reverse`). With the gateway running, `hermes -z` in the profile answered in 28 s and
+  `hermes gateway status` reported the default-profile multiplexer serving it. The CLI connection
+  works, so the patch series stays empty. Sessions are stored in the profile.
+- **End:** the gateway received SIGTERM, tore down in 0.1 s and was gone 0.55 s after End, with no
+  process left. It exits with code 1 by design ("so the service manager can revive the gateway")
+  and records that it was running.
+
+For the dedicated app: write the listener settings to `/root/.hermes/.env` at each start; keep
+`response_store.db` (or accept losing `/v1/responses` chains on an image upgrade); expect the
+first launch to cost the bytecode compile unless the image precompiles it; treat the gateway's
+exit code 1 after End as normal.

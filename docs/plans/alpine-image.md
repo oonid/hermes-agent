@@ -801,11 +801,14 @@ The gateway is one per container, started from the root home; it serves the `and
 with the profile's settings (`hermes gateway run` inside the profile is refused with exit 78):
 
 ```sh
-API_SERVER_ENABLED=true API_SERVER_KEY=<16+ characters> HERMES_HOME=/root/.hermes hermes gateway run
+printf 'API_SERVER_ENABLED=true\nAPI_SERVER_KEY=<16+ characters>\n' > /root/.hermes/.env
+HERMES_HOME=/root/.hermes hermes gateway run
 ```
 
-With `API_SERVER_KEY` (16+ characters) also in `$HERMES_HOME/.env`, the profile's OpenAI-compatible
-API is at `http://127.0.0.1:8642/p/android/v1`.
+The listener settings must be in `/root/.hermes/.env`: a gateway serving profiles ignores keys
+passed as process environment. With an `API_SERVER_KEY` (16+ characters) also in
+`$HERMES_HOME/.env`, the profile's OpenAI-compatible API is at
+`http://127.0.0.1:8642/p/android/v1`.
 
 Updating Hermes means installing a newer image; `hermes update` does not work inside the
 container.
@@ -886,8 +889,9 @@ GitHub disables schedules in a public repository after 60 days without repositor
   and finishes within seconds.
 - [ ] **Step 3: Gateway check** (ask the user before putting the provider key on the phone; remove
   it afterwards). As in oonid/pr PR #16: provider settings in the profile's `.env` and
-  `config.yaml`, plus `API_SERVER_KEY` (16+ characters) in the profile's `.env`; the host gateway
-  `API_SERVER_ENABLED=true API_SERVER_KEY=<16+ chars> HERMES_HOME=/root/.hermes hermes gateway run > /tmp/gw.log 2>&1 &`;
+  `config.yaml`, plus `API_SERVER_KEY` (16+ characters) in the profile's `.env`; the listener
+  settings (`API_SERVER_ENABLED=true`, a root `API_SERVER_KEY`) in `/root/.hermes/.env`; the host
+  gateway `HERMES_HOME=/root/.hermes hermes gateway run > /tmp/gw.log 2>&1 &`;
   at least two requests to `http://127.0.0.1:8642/p/android/v1` with the profile's key through
   `adb forward`; the sessions land under `$HERMES_HOME`; with the gateway running, `hermes -z "Reply with the single
   word OK"` in the same shell must connect and answer (this is the CLI-to-gateway case the earlier
