@@ -1,0 +1,115 @@
+name: alpine-image
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to build (default: the latest stable release)"
+        required: false
+        default: ""
+      force:
+        description: "Rebuild even if this release and build hash (patches + image recipe) are already published"
+        type: boolean
+        default: false
+  push:
+    branches: [android]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: alpine-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/oonid/hermes-agent
+  UPSTREAM_URL: https://github.com/NousResearch/hermes-agent.git
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      patch_hash: ${{ steps.detect.outputs.patch_hash }}
+      build_tag: ${{ steps.detect.outputs.build_tag }}
+      build: ${{ steps.detect.outputs.build }}
+      is_latest: ${{ steps.detect.outputs.is_latest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Unit tests
+        run: python3 -m unittest discover -s image/tests -v
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Detect the release to build
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_INPUT: ${{ inputs.tag }}
+          FORCE_INPUT: ${{ inputs.force }}
+        run: |
+          args=(--image "$IMAGE" --patches patches)
+          if [ -n "$TAG_INPUT" ]; then args+=(--tag "$TAG_INPUT"); fi
+          if [ "$FORCE_INPUT" = "true" ]; then args+=(--force); fi
+          python3 image/detect_release.py "${args[@]}"
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.build == 'true'
+    runs-on: ubuntu-24.04-arm
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      PATCH_HASH: ${{ needs.detect.outputs.patch_hash }}
+      BUILD_TAG: ${{ needs.detect.outputs.build_tag }}
+      IS_LATEST: ${{ needs.detect.outputs.is_latest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the upstream release with the patch series
+        run: image/prepare.sh "$UPSTREAM_URL" "$VERSION" patches work/src
+      - name: Build
+        run: image/build.sh work/src "$VERSION" "$PATCH_HASH" linux/arm64 "$IMAGE:$BUILD_TAG"
+      - name: Smoke test
+        run: image/smoke.sh "$IMAGE:$BUILD_TAG" "$VERSION"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: |
+          set -o pipefail
+          alpine=$(sed -n 's/^ARG ALPINE_VERSION=//p' image/Dockerfile.alpine)
+          tags=("$BUILD_TAG" "$VERSION" "$VERSION-alpine$alpine")
+          if [ "$IS_LATEST" = "true" ]; then tags+=(latest); fi
+          for tag in "${tags[@]}"; do
+            docker tag "$IMAGE:$BUILD_TAG" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          digest=$(docker image inspect "$IMAGE:$BUILD_TAG" --format '{{index .RepoDigests 0}}')
+          size=$(docker image inspect "$IMAGE:$BUILD_TAG" --format '{{.Size}}' | numfmt --to=iec)
+          compressed=$(docker manifest inspect "$IMAGE:$BUILD_TAG" \
+            | python3 -c 'import json,sys; m=json.load(sys.stdin); print(sum(l["size"] for l in m.get("layers", [])))' \
+            | numfmt --to=iec)
+          bt='`'
+          shopt -s nullglob
+          names=(patches/*.patch)
+          if [ ${#names[@]} -gt 0 ]; then
+            applied=$(printf "$bt%s$bt " "${names[@]##*/}")
+          else
+            applied=none
+          fi
+          {
+            echo "## $IMAGE"
+            echo
+            echo "- Upstream release: \`$VERSION\`"
+            echo "- Build hash: \`$PATCH_HASH\`"
+            echo "- Applied patches: $applied"
+            echo "- Tags: $(printf "$bt%s$bt " "${tags[@]}")"
+            echo "- Digest: \`$digest\`"
+            echo "- Size: $size uncompressed, $compressed compressed"
+          } >> "$GITHUB_STEP_SUMMARY"
