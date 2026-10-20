@@ -36,6 +36,7 @@ jobs:
       patch_hash: ${{ steps.detect.outputs.patch_hash }}
       build_tag: ${{ steps.detect.outputs.build_tag }}
       build: ${{ steps.detect.outputs.build }}
+      variants: ${{ steps.detect.outputs.variants }}
       is_latest: ${{ steps.detect.outputs.is_latest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +63,12 @@ jobs:
     needs: detect
     if: needs.detect.outputs.build == 'true'
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.detect.outputs.variants) }}
     env:
+      VARIANT: ${{ matrix.variant }}
       VERSION: ${{ needs.detect.outputs.version }}
       PATCH_HASH: ${{ needs.detect.outputs.patch_hash }}
       BUILD_TAG: ${{ needs.detect.outputs.build_tag }}
@@ -71,10 +77,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the upstream release with the patch series
         run: image/prepare.sh "$UPSTREAM_URL" "$VERSION" patches work/src
+      - name: Variant suffix
+        run: |
+          if [ "$VARIANT" = full ]; then echo "SUFFIX=" >> "$GITHUB_ENV"; else echo "SUFFIX=-$VARIANT" >> "$GITHUB_ENV"; fi
       - name: Build
-        run: image/build.sh work/src "$VERSION" "$PATCH_HASH" linux/arm64 "$IMAGE:$BUILD_TAG"
+        run: image/build.sh work/src "$VERSION" "$PATCH_HASH" "$VARIANT" linux/arm64 "$IMAGE:$BUILD_TAG$SUFFIX"
       - name: Smoke test
-        run: image/smoke.sh "$IMAGE:$BUILD_TAG" "$VERSION"
+        run: image/smoke.sh "$IMAGE:$BUILD_TAG$SUFFIX" "$VERSION"
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -84,15 +93,18 @@ jobs:
         run: |
           set -o pipefail
           alpine=$(sed -n 's/^ARG ALPINE_VERSION=//p' image/Dockerfile.alpine)
-          tags=("$BUILD_TAG" "$VERSION" "$VERSION-alpine$alpine")
-          if [ "$IS_LATEST" = "true" ]; then tags+=(latest); fi
+          ref="$IMAGE:$BUILD_TAG$SUFFIX"
+          tags=("$BUILD_TAG$SUFFIX" "$VERSION$SUFFIX" "$VERSION$SUFFIX-alpine$alpine")
+          if [ "$IS_LATEST" = "true" ]; then
+            if [ "$VARIANT" = full ]; then tags+=(latest); else tags+=("$VARIANT"); fi
+          fi
           for tag in "${tags[@]}"; do
-            docker tag "$IMAGE:$BUILD_TAG" "$IMAGE:$tag"
+            docker tag "$ref" "$IMAGE:$tag"
             docker push "$IMAGE:$tag"
           done
-          digest=$(docker image inspect "$IMAGE:$BUILD_TAG" --format '{{index .RepoDigests 0}}')
-          size=$(docker image inspect "$IMAGE:$BUILD_TAG" --format '{{.Size}}' | numfmt --to=iec)
-          compressed=$(docker manifest inspect "$IMAGE:$BUILD_TAG" \
+          digest=$(docker image inspect "$ref" --format '{{index .RepoDigests 0}}')
+          size=$(docker image inspect "$ref" --format '{{.Size}}' | numfmt --to=iec)
+          compressed=$(docker manifest inspect "$ref" \
             | python3 -c 'import json,sys; m=json.load(sys.stdin); print(sum(l["size"] for l in m.get("layers", [])))' \
             | numfmt --to=iec)
           bt='`'
@@ -104,7 +116,7 @@ jobs:
             applied=none
           fi
           {
-            echo "## $IMAGE"
+            echo "## $IMAGE ($VARIANT)"
             echo
             echo "- Upstream release: \`$VERSION\`"
             echo "- Build hash: \`$PATCH_HASH\`"

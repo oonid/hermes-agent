@@ -11,7 +11,8 @@ import urllib.request
 from pathlib import Path
 
 UPSTREAM = "NousResearch/hermes-agent"
-RECIPE = ("image/Dockerfile.alpine", "image/profile.d")
+VARIANTS = ("full", "gateway")
+RECIPE = ("image/Dockerfile.alpine", "image/profile.d", "image/slim.sh")
 
 
 def _recipe_files(recipe):
@@ -64,15 +65,28 @@ def image_exists(ref) -> bool:
     return subprocess.run(["docker", "manifest", "inspect", ref], capture_output=True).returncode == 0
 
 
+def variant_tag(build_tag, variant):
+    return build_tag if variant == "full" else f"{build_tag}-{variant}"
+
+
 def decide(image, patch_dir, tag=None, force=False, fetch=None, exists=None,
            recipe=()):
     latest = latest_release(fetch)
     version = tag or latest
     phash = patch_hash(patch_dir, recipe)
     build_tag = f"{version}-p{phash}"
-    build = force or not (exists or image_exists)(f"{image}:{build_tag}")
+    has = exists or image_exists
+    variants = [v for v in VARIANTS if force or not has(f"{image}:{variant_tag(build_tag, v)}")]
     return {"version": version, "patch_hash": phash, "build_tag": build_tag,
-            "build": build, "is_latest": version == latest}
+            "build": bool(variants), "variants": variants, "is_latest": version == latest}
+
+
+def _format(value):
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, list):
+        return json.dumps(value, separators=(",", ":"))
+    return value
 
 
 def main(argv=None):
@@ -84,8 +98,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     result = decide(args.image, Path(args.patches), args.tag or None, args.force,
                     recipe=RECIPE)
-    lines = [f"{key}={str(value).lower() if isinstance(value, bool) else value}"
-             for key, value in result.items()]
+    lines = [f"{key}={_format(value)}" for key, value in result.items()]
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:

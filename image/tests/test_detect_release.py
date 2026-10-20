@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -125,16 +126,44 @@ class DecideTest(unittest.TestCase):
     def test_new_release_builds_and_is_latest(self):
         r = d.decide("ghcr.io/o/h", self.patches, fetch=release("v0.22.2"), exists=self.exists_if(False))
         self.assertEqual(r, {"version": "v0.22.2", "patch_hash": self.hash,
-                             "build_tag": f"v0.22.2-p{self.hash}", "build": True, "is_latest": True})
-        self.assertEqual(self.seen, [f"ghcr.io/o/h:v0.22.2-p{self.hash}"])
+                             "build_tag": f"v0.22.2-p{self.hash}", "build": True,
+                             "variants": ["full", "gateway"], "is_latest": True})
+        self.assertEqual(self.seen, [f"ghcr.io/o/h:v0.22.2-p{self.hash}",
+                                     f"ghcr.io/o/h:v0.22.2-p{self.hash}-gateway"])
 
     def test_already_built_is_skipped(self):
         r = d.decide("ghcr.io/o/h", self.patches, fetch=release(), exists=self.exists_if(True))
         self.assertFalse(r["build"])
+        self.assertEqual(r["variants"], [])
 
     def test_force_rebuilds(self):
         r = d.decide("ghcr.io/o/h", self.patches, force=True, fetch=release(), exists=self.exists_if(True))
         self.assertTrue(r["build"])
+        self.assertEqual(r["variants"], ["full", "gateway"])
+
+    def test_variant_tag(self):
+        self.assertEqual(d.variant_tag("v1-pabc", "full"), "v1-pabc")
+        self.assertEqual(d.variant_tag("v1-pabc", "gateway"), "v1-pabc-gateway")
+
+    def test_only_missing_variants_are_built(self):
+        published = {f"ghcr.io/o/h:v0.22.2-p{self.hash}"}
+        r = d.decide("ghcr.io/o/h", self.patches, fetch=release(), exists=published.__contains__)
+        self.assertEqual(r["variants"], ["gateway"])
+        self.assertTrue(r["build"])
+
+    def test_main_prints_variants_as_compact_json(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with mock.patch.object(d, "decide", return_value={
+                "version": "v1", "patch_hash": "abc", "build_tag": "v1-pabc", "build": True,
+                "variants": ["full", "gateway"], "is_latest": True}), \
+                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": ""}), \
+                contextlib.redirect_stdout(out):
+            d.main(["--image", "img"])
+        lines = out.getvalue().splitlines()
+        self.assertIn('variants=["full","gateway"]', lines)
+        self.assertIn("build=true", lines)
 
     def test_an_older_tag_is_not_latest(self):
         r = d.decide("ghcr.io/o/h", self.patches, tag="v0.21.7", fetch=release("v0.22.2"),
