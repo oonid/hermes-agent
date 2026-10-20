@@ -8,10 +8,12 @@ ARG HERMES_COMMIT
 ARG HERMES_VERSION
 ARG FORK_REVISION
 ARG PATCH_HASH
+ARG VARIANT=full
 
 # Clone the prepared checkout into place so the installer takes its existing-checkout path.
 # The .git is a read-only bind mount, so it adds no layer (the clone stays).
 RUN --mount=type=bind,from=srcgit,target=/src/hermes.git \
+    --mount=type=bind,source=slim.sh,target=/src/slim.sh \
     git clone --quiet --branch image-build file:///src/hermes.git /root/.hermes/hermes-agent \
     && HERMES_HOME=/root/.hermes HERMES_REPO_URL=file:///src/hermes.git \
         bash /root/.hermes/hermes-agent/scripts/install.sh --branch image-build --commit "${HERMES_COMMIT}" \
@@ -20,7 +22,8 @@ RUN --mount=type=bind,from=srcgit,target=/src/hermes.git \
     && export PATH="/root/.local/bin:${PATH}" \
     && ln -sf "$(command -v hermes)" /usr/local/bin/hermes \
     && mkdir -p /root/.hermes/profiles/android \
-    && rm -rf /root/.hermes/.env /root/.hermes/telemetry /root/.hermes/cache/uv /root/.cache /root/.npm /tmp/* /var/cache/apk/*
+    && rm -rf /root/.hermes/.env /root/.hermes/telemetry /root/.hermes/cache/uv /root/.cache /root/.npm /tmp/* /var/cache/apk/* \
+    && bash /src/slim.sh "${VARIANT}"
 
 COPY profile.d/hermes.sh /etc/profile.d/hermes.sh
 ENV HERMES_HOME=/root/.hermes/profiles/android
@@ -30,6 +33,7 @@ LABEL org.opencontainers.image.source="https://github.com/oonid/hermes-agent" \
       org.opencontainers.image.version="${HERMES_VERSION}" \
       org.opencontainers.image.revision="${FORK_REVISION}" \
       io.github.oonid.hermes.upstream-commit="${HERMES_COMMIT}" \
-      io.github.oonid.hermes.patch-hash="${PATCH_HASH}"
+      io.github.oonid.hermes.patch-hash="${PATCH_HASH}" \
+      io.github.oonid.hermes.variant="${VARIANT}"
 
 CMD ["hermes"]
