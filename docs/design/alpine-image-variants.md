@@ -1,7 +1,7 @@
 # Alpine Hermes Image Variants
 
 **Date:** 2026-10-20
-**Status:** implemented; validation on a phone pending (§9)
+**Status:** implemented and validated on a phone (§9)
 **Builds on:** `docs/design/alpine-image.md` (the full image, validated on a phone in its §11)
 
 ## 1. Goal
@@ -111,4 +111,31 @@ features (browser automation, TTS), trimming the venv's `workspace/`, amd64 imag
 
 ## 9. Validation on a Phone
 
-Pending.
+On 2026-10-21, `ghcr.io/oonid/hermes-agent:v0.22.2-gateway` (build `v0.22.2-pab570a0b-gateway`) on
+an Android 16 phone with oonid/pr 1.0.0, as a Custom OCI image with alias `hermes-gw`, against the
+full image's results in `docs/design/alpine-image.md` §11:
+
+| | full | gateway |
+|---|---|---|
+| Install | 99 s | 48 s |
+| Downloaded | 618 MB | 255 MB |
+| On the phone | 1.7 GB | 748 MB |
+| First `hermes --version` | 10.2 s | 2.3 s |
+| Later `hermes --version` | 7.7 s | 2.9–3.2 s |
+
+In both cases the Alpine base layer was already in pr-cli's layer cache, so three layers were
+downloaded.
+
+- **First run:** `HERMES_HOME` is the profile, empty; no dependency sync and no `installs/` in the
+  profile; no bytecode written by any run (checked across the checkout, the runtimes and the
+  venv), so the precompiled bytecode is valid as pr-cli extracts it. `hermes pm doctor` exits 0
+  with no problem.
+- **TUI and dashboard:** `hermes --tui` shows its first screen (the setup prompt, with no provider
+  configured yet) without rebuilding; `hermes dashboard` serves its page on port 9119 after 22 s,
+  without rebuilding.
+- **Gateway:** started from the root home with the listener settings in `/root/.hermes/.env`, its
+  API answered `/health` 27 s after start. Two chat requests to `/p/android/v1` answered (13 s and
+  4 s, a model served through a local proxy reached with `adb reverse`); with the gateway running,
+  `hermes -z` in the profile answered in 32 s and `hermes gateway status` reported the
+  default-profile multiplexer serving it.
+- **End:** the gateway tore down in 0.12 s and was gone 0.54 s after End, with no process left.
