@@ -16,10 +16,13 @@ Agent preinstalled, for Android apps that run Linux containers under PRoot (no r
 | Variant | Tags | On the phone / download | Works | Not included |
 |---------|------|-------------------------|-------|--------------|
 | full | `<version>`, `<version>-alpine<x.y>`, `latest` | 1.7 GB / 622 MB | everything upstream installs | browser automation, computer use |
-| gateway | `<version>-gateway`, `<version>-gateway-alpine<x.y>`, `gateway` | ~0.7 GB / ~265 MB (amd64 build) | the gateway and its API, every messaging platform, cron, `hermes` and `hermes -z`, the prebuilt TUI and dashboard | rebuilding the TUI or dashboard from source, the checkout's git history, debug symbols, Google APIs beyond the seven Hermes uses, tests |
+| gateway | `<version>-gateway`, `<version>-gateway-alpine<x.y>`, `gateway` | ~0.7 GB / ~265 MB (amd64 build) | the gateway and its API, Telegram, cron, `hermes` and `hermes -z`, the prebuilt TUI and dashboard | rebuilding the TUI or dashboard from source, the checkout's git history, debug symbols, Google APIs beyond the seven Hermes uses, tests |
 
 - Hermes is installed by its own installer under `/root/.hermes`; browser automation and computer
   use are left out because they cannot run under PRoot on Android.
+- Both variants add Hermes's `telegram` extra. Hermes installs the library of any other messaging
+  platform (Discord, Slack, Matrix, ...) the first time it is configured. That needs network, and
+  it runs while the gateway starts, which can hold the gateway up until its watchdog stops it.
 - Your data lives in the Hermes profile `/root/.hermes/profiles/android` (`HERMES_HOME`). It is
   empty in the image and reuses the image's dependencies, so an app can keep it outside the
   container and swap in a newer image without losing it.

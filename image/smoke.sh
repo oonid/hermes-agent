@@ -27,13 +27,17 @@ leaks=$(run 'find /root /etc -xdev \( -path /root/.hermes/hermes-agent -o -path 
 [ -z "$leaks" ] || fail "secret-like files in the image: $leaks"
 
 gw=$(run 'key=$(head -c16 /dev/urandom | od -An -tx1 | tr -d " \n")
-printf "API_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n" "$key" > /root/.hermes/.env
+printf "API_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\nTELEGRAM_BOT_TOKEN=123456:smoke\n" "$key" > /root/.hermes/.env
 printf "API_SERVER_KEY=%s\n" "$key" > "$HERMES_HOME/.env"
 HERMES_HOME=/root/.hermes hermes gateway run >/tmp/gw.log 2>&1 &
 for i in $(seq 1 90); do curl -fs -m 2 http://127.0.0.1:8642/health && break; sleep 1; done
-echo; hermes gateway status 2>&1' 2>&1 || true)
+echo; hermes gateway status 2>&1; echo; cat /tmp/gw.log' 2>&1 || true)
 grep -q '"status": "ok"' <<<"$gw" || fail "the gateway API did not answer /health: $gw"
 grep -q "default-profile multiplexer" <<<"$gw" || fail "the gateway does not serve the profile: $gw"
+# A missing platform extra is installed while the gateway starts, which blocks its event loop.
+if grep -qE "Installing Python dependencies|Platform 'Telegram' requirements not met" <<<"$gw"; then
+    fail "the gateway lacks the telegram extra: $(grep -E 'Installing|Telegram' <<<"$gw")"
+fi
 
 doctor=$(run 'hermes pm doctor 2>&1') || fail "hermes pm doctor found problems: $(grep '✗' <<<"$doctor" || echo "$doctor")"
 

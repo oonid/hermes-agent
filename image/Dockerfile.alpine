@@ -12,6 +12,9 @@ ARG VARIANT=full
 
 # Clone the prepared checkout into place so the installer takes its existing-checkout path.
 # The .git is a read-only bind mount, so it adds no layer (the clone stays).
+# Telegram's extra is installed now, not on first use: that install runs while the gateway
+# starts and blocks it past its liveness watchdog. It publishes a second dependency
+# generation; PM's own cleanup drops the first now instead of after its one-day grace.
 RUN --mount=type=bind,from=srcgit,target=/src/hermes.git \
     --mount=type=bind,source=slim.sh,target=/src/slim.sh \
     git clone --quiet --branch image-build file:///src/hermes.git /root/.hermes/hermes-agent \
@@ -20,6 +23,11 @@ RUN --mount=type=bind,from=srcgit,target=/src/hermes.git \
         --non-interactive --skip-browser --skip-computer-use \
     && git -C /root/.hermes/hermes-agent repack -adq \
     && export PATH="/root/.local/bin:${PATH}" \
+    && HERMES_HOME=/root/.hermes hermes pm install --extra telegram \
+    && HERMES_HOME=/root/.hermes "$(ls -d /root/.hermes/tools/python-*/bin/python3)" -I -c \
+        'import sys; sys.path.insert(0, "/root/.hermes/hermes-agent"); \
+        from hermes_cli.runtime_state import collect_generations; from pm.paths import repo_root; \
+        collect_generations(repo_root(), min_age_seconds=0)' \
     && ln -sf "$(command -v hermes)" /usr/local/bin/hermes \
     && mkdir -p /root/.hermes/profiles/android \
     && rm -rf /root/.hermes/.env /root/.hermes/telemetry /root/.hermes/cache/uv /root/.cache /root/.npm /tmp/* /var/cache/apk/* \
