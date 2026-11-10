@@ -4,6 +4,11 @@ This branch of `oonid/hermes-agent` builds `ghcr.io/oonid/hermes-agent`: Alpine 
 Agent preinstalled, for Android apps that run Linux containers under PRoot (no root, no VM). The
 `main` branch mirrors upstream `NousResearch/hermes-agent` unchanged.
 
+Update `main` with `scripts/sync-main.sh` (`--check` only reports), never with GitHub's "Sync
+fork" button: the button targets this default branch, which shares no history with upstream. The
+script fast-forwards `main` with Actions paused, then cancels any upstream workflow run the push
+still started and disables any newly registered workflow other than `alpine-image`.
+
 ## The image
 
 - Each upstream stable release, with the patches in `patches/` applied, built for `linux/arm64`.
